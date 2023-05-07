@@ -1,0 +1,601 @@
+DO188
+
+
+========== Chapter 2. Podman Basics
+
+===== Creating Containers with Podman
+
+Podman is an open source tool that you can use to manage your containers locally. 
+
+By default, Podman is daemonless. 
+
+  It does not use a daemon to proxy the requests, which means no single point of failure.
+
+  It does not require elevated privileges.
+
+      https://programmer.ink/think/podman-introduction-installation-basic-operations.html
+
+
+A container is an isolated runtime environment where applications are executed as isolated processes.
+
+A container image contains a packaged version of your application, with all the dependencies necessary for the application to run. You create your containers from container images.
+
+    
+Working with Podman
+
+Checking the version
+
+  $ podman -v
+
+
+Pulling and displayin images
+
+  $ podman pull registry.redhat.io/rhel7/rhel:7.9
+
+  $ podman images
+
+
+
+
+
+
+Prepare the lab
+
+  $ lab start basics-creating
+
+
+Pull the image then create a new container
+
+  $ podman pull \
+  registry.ocp4.example.com:8443/ubi8/ubi-minimal:8.5
+
+  $ podman images
+
+  $ podman run \
+  registry.ocp4.example.com:8443/ubi8/ubi-minimal:8.5 echo 'Hello Red Hat'
+
+  $ podman ps
+
+
+
+Use -e to set environment variables.
+
+  $ podman run -e GREET=Hello -e NAME='Red Hat' \
+  registry.ocp4.example.com:8443/ubi8/ubi-minimal:8.5 printenv GREET NAME
+
+  $ podman ps
+
+
+
+Use -p for port redirection
+
+  $ podman run -p 8080:8080 \
+  registry.ocp4.example.com:8443/ubi8/httpd-24
+
+  $ curl http://localhost:8080
+
+
+
+Create the container and run it in the background 
+
+  $ podman run -d -p 8080:8080 registry.ocp4.example.com:8443/ubi8/httpd-24
+
+
+
+
+
+===== Container Networking Basics & Accessing Containerized Network Services
+
+Podman comes with a network called podman.
+
+By default, DNS in not enabled in the default network.
+
+To use separate and isolated networks, create new ones. DNS is enabled by in user-defined networks.
+
+When using a network with DNS enabled, a container’s hostname is the name assigned to the container, and containers connected to the same network can communicate with each others using their hostnames.
+
+For instance,
+
+  A network for ui
+  A network for API
+  A network for Database
+
+
+
+To manage Podman networks
+
+  $ podman network create
+ 
+  $ podman network ls
+ 
+  $ podman network inspect
+ 
+  $ podman network rm
+ 
+  $ podman network prune
+ 
+  $ podman network connect
+
+
+  Examples:
+
+    $ podman network create test-net
+
+    $ podman run -d --name test-container \
+    --net test-net container-image:latest
+
+
+To forward port
+
+  $ podman run -p 8075:80 httpd
+
+
+To list port mapping
+
+  $ podman port my-app
+  8008/tcp -> 0.0.0.0:8010
+
+
+To get the IP assigned to the container from the network
+
+  $ podman inspect my-app \
+  -f '{{.NetworkSettings.Networks.apps.IPAddress}}'
+
+
+
+Prepare the lab
+
+$ lab start basics-exposing
+
+  This exercise uses two applications: times and cities. The times application returns the current time of a given city, and the cities application returns information about a specific city.
+
+  
+1. Examine the source code of the applications.
+
+$ cd ~/DO188/labs/basics-exposing
+
+$ cat podman-info-times/app/main.go
+  ...
+  http.ListenAndServe(":8080", r)
+  ...
+
+$ cat podman-info-cities/app/main.go
+...
+http.ListenAndServe(":8090", r)
+...
+
+$ cd ~
+
+
+
+2. Create a Podman network with DNS enabled, as DNS is disabled in the default podman network.
+
+$ podman network inspect podman
+
+$ podman network create cities
+
+$ podman network inspect cities
+
+
+
+3. Start and test the times application attached to the cities network. 
+
+$ podman run --name times-app \
+--network cities -p 8080:8080 -d \
+registry.ocp4.example.com:8443/redhattraining/podman-info-times:v0.1
+
+
+$ podman inspect times-app \
+-f '{{.NetworkSettings.Networks.cities.IPAddress}}'
+
+
+From another container, the times-app container is reacheable by IP and by name.
+
+$ podman run --rm --network cities \
+registry.ocp4.example.com:8443/ubi8/ubi-minimal:8.5 \
+curl -s http://IP_ADDRESS:8080/times/BKK && echo
+
+
+$ podman run --rm --network cities \
+registry.ocp4.example.com:8443/ubi8/ubi-minimal:8.5 \
+curl -s http://times-app:8080/times/BKK && echo
+
+
+
+4. Start and test the cities application attached to the cities network.
+
+$ podman run --name cities-app \
+--network cities -p 8090:8090 -d \
+-e TIMES_APP_URL=http://times-app:8080/times \
+registry.ocp4.example.com:8443/redhattraining/podman-info-cities:v0.1
+
+
+Fetch the city information of Madrid
+
+$ curl -s http://localhost:8090/cities/MAD | jq
+
+
+
+End Lab
+
+$ lab finish basics-exposing
+
+
+
+
+===== Accessing Containers
+
+Podman provide a way to start new processes within containers in the running state. This is useful for example when you want to read a log file, verify the value of an environment variable, or debug a process.
+
+  Execute a command inside the container
+
+    $ podman exec httpd ls
+
+    $ podman exec httpd cat /etc/httpd/conf/httpd.conf
+
+  Open an interactive terminal
+
+    $ podman exec -it httpd  /bin/bash
+
+
+Copy files from host to containers (or vice-versa), or between containers
+
+  $ podman cp nginx.conf nginx:/etc/nginx
+
+  $ podman cp nginx-test:/etc/nginx/nginx.conf nginx-proxy:/etc/nginx
+
+  
+
+
+
+Prepare the lab
+
+  Use the podman exec and podman cp commands to debug and correct container configuration
+
+  $ lab start basics-accessing
+
+
+1. Create a new container.
+
+$ podman run --name nginx -d -p 8080:8080 \
+  registry.ocp4.example.com:8443/redhattraining/podman-nginx-helloworld
+
+
+$ curl localhost:8080
+404 Not Found
+
+  The container is not accessible. You'll have to troubleshoot the issue
+
+
+
+2. Troubleshoot the issue
+
+$ podman cp nginx:/var/log/nginx/error.log error.log
+
+
+$ less error.log
+...
+2022/04/26 12:19:17 [error] 2#0: *2 "/usr/share/nginx/html/public/index.html" is not found (2: No such file or directory), client: 10.0.2.100, server: _, request: "GET / HTTP/1.1", host: "localhost:8080"
+...
+
+  The server cannot read the /usr/share/nginx/html/public/index.html file.
+
+$ podman exec nginx ls /usr/share/nginx/html/public
+ls: cannot access '/usr/share/nginx/html/public': No such file or directory
+
+  The directory does not exist in the container.
+
+
+$ podman exec nginx ls /usr/share/nginx/html
+
+  The index.html page exists in the /usr/share/nginx/html directory.
+
+
+
+3. Correct the server configuration.
+
+$ podman cp nginx:/etc/nginx/nginx.conf nginx.conf
+
+
+$ gedit nginx.conf
+...
+    server {
+        listen       8080 default_server;
+        server_name  _;
+        root         /usr/share/nginx/html/;
+...
+
+  change the root parameter to the /usr/share/nginx/html/ value.
+
+
+$ podman cp nginx.conf nginx:/etc/nginx/nginx.conf
+
+
+4. Reload the server configuration & test again
+
+$ podman exec nginx nginx -s reload
+
+$ curl localhost:8080
+
+
+
+===== Managing the Container Lifecycle
+
+Podman provides a set of subcommands to create and manage containers. You can use those subcommands to manage the container and container image lifecycle.
+
+  
+
+
+Prepare Lab
+
+  Manage the lifecycle of a container that runs an Apache HTTP server
+
+  $ lab start basics-lifecycle
+
+
+1. Create a new container that runs an Apache HTTP server in the background.
+
+  $ podman run --name httpd -d -p \
+  8080:8080 registry.ocp4.example.com:8443/ubi8/httpd-24
+
+  $ podman ps
+
+
+2. Verify that the container is running.
+
+  $ podman inspect --format='{{.State.Status}}' httpd
+  running
+
+  $ podman inspect --format='{{.State.Running}}' httpd
+  true
+
+
+3. Stop the container.
+
+  $ podman stop httpd
+
+  $ podman inspect --format='{{.State.Status}}' httpd
+  exited
+
+  $ podman inspect --format='{{.State.Running}}' httpd
+  false
+
+
+
+4. Restart the container, then remove it
+
+  $ podman restart httpd
+
+  $ podman ps
+
+  $ podman rm httpd   OR podman stop httpd && podman rm httpd
+
+  $ podman rm httpd --force
+
+
+End Lab
+
+  $ lab finish basics-lifecycle
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+========== Deploy Applications in OpenShift
+
+===== Kubernetes and RHOCP architecture
+
+    Diagram
+
+=== Interacting with RHOCP
+
+You may interact with OCP using the CLI or the Web console
+
+CLI
+
+$ oc login https://api.ocp4.example.com:6443
+
+$ oc get
+
+$ oc create
+
+$ oc delete
+
+$ oc logs
+
+Web Console
+
+$ oc whoami --show-console
+
+$ oc get route -n openshift-console
+
+$ firefox https://console-openshift-console.apps.ocp4.example.com &
+
+The web console provides the Administrator and Developer perspectives. The Developer perspective focuses on the status and management of the deployed applications. The Administrator perspective focuses on the status and management of RHOCP and its resources.
+
+The Developer > Topology view provides a visual representation of deployed applications.
+
+
+
+
+===== Explain RHOCP Resources
+
+Developers configure RHOCP by using a set of Kubernetes and RHOCP-specific objects. When you create or modify an object, you make a persistent record of the intended state in YAML. RHOCP reads the object and modifies the current state accordingly.
+
+kind: Pod
+apiVersion: v1
+metadata:
+  name: example-pod
+  namespace: example-namespace
+spec:
+...
+status:
+  conditions:
+  - lastProbeTime: null
+    lastTransitionTime: "2022-08-19T12:59:22Z"
+    status: "True"
+    type: PodScheduled
+  containerStatuses:
+  - containerID: cri-o://e37c....f5c2
+    image: quay.io/example/awesome-container:latest
+    lastState: {}
+    name: podman-quotes-ui
+    ready: true
+...
+
+Use the oc explain command to get information about valid fields for an object.
+
+$ oc explain pod.metadata.name
+KIND:     Pod
+VERSION:  v1
+
+FIELD:    name <string>
+
+DESCRIPTION:
+...
+
+
+Labels are key-value pairs that you define in the object .metadata.labels path, for example:
+
+kind: Pod
+apiVersion: v1
+metadata:
+  name: example-pod
+  labels:
+    app: example-pod
+    group: developers
+...
+
+
+Developers often use labels to target a set of objects by using the -l or the equivalent --selector option.
+
+$ oc get pod --selector group=developers
+
+
+
+
+===== Deploy Applications as Pods to RHOCP
+
+
+
+
+===== Guided Exercise
+
+Create and modify (RHOCP) objects.
+
+0. Prepare the lab
+
+$ lab start openshift-applications
+
+1. Explore the podman-hello-client application
+
+$ cd ~/DO188/labs/openshift-applications/podman-hello-client/
+
+$ less Containerfile
+
+FROM registry.access.redhat.com/ubi8/ubi-minimal:8.6
+
+ARG PROTO="http" \
+    URL="hello-server-svc" \
+    PORT="3000" \
+    ENDPOINT="greet"
+
+ENV PROTO=${PROTO} \
+    URL=${URL} \
+    PORT=${PORT} \
+    ENDPOINT=${ENDPOINT}
+
+...
+
+CMD ["./client.sh"]
+
+
+The client.sh uses environment variables, and the content below
+
+$ curl ${OPTS} "${PROTO}://${URL}:${PORT}/${ENDPOINT}"
+
+is equivalent to the content below 
+
+$ curl http://hello-server-svc:3000/greet 
+
+
+
+2. Explore the deployed app in OCP
+
+firefox https://console-openshift-console.apps.ocp4.example.com. &
+
+
+ocp-applications > Topology
+
+Note the hello-server and hello-client application pods
+
+hello-server > hello-server-svc
+
+The service serves on port 3000 and routes requests to the port 3000 inside the hello-server pod
+
+
+hello-client > View logs
+
+The hello-client application sends requests to the http://hello-server-svc:3000/greet URL and prints the {"hello": "world"} response to the console.
+
+
+3. Modify the hello-server-svc service to serve on the 8080 port.
+
+hello-server > hello-server-svc > YAML
+
+...
+  ports:
+    - protocol: TCP
+      port: 8080
+      targetPort: 3000
+...
+
+Save > Details > Port Mapping
+
+    Port: 8080
+    Pod port or name: 3000
+
+
+4. Modify the hello-client pod to use the 8080 port.
+
+$ oc whoami --show-context
+
+$ oc logs hello-client | tail -n 1
+empty line expected
+
+$ oc delete pod hello-client
+
+$ oc run hello-client --env PORT=8080 \
+  --image registry.ocp4.example.com:8443/redhattraining/podman-hello-client:latest
+
+
+$ oc get pod
+NAME           READY   STATUS    RESTARTS   AGE
+hello-client   1/1     Running   0          32s
+hello-server   1/1     Running   0          83m
+
+$ oc logs hello-client | tail -n 1
+{"hello":"world"}
+
+
+
+00. Finish the lab
+
+$ lab finish openshift-applications
+
+
+
+
